@@ -8,6 +8,7 @@ on:
 
 jobs:
   lint:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,6 +19,9 @@ jobs:
       - run: npm run lint
 
   unit-tests:
+    # Run after lint ensures code quality
+    needs: lint
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +32,9 @@ jobs:
       - run: npm test
 
   build:
+    # Run after lint ensures code quality
+    needs: lint
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +43,16 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npm run build
-      # Problem 4: no upload-artifact step — dist/ is never saved
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-build
+          path: dist/
 
   integration-tests:
+    # Run after build completes to test the artifact
+    needs: build
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,22 +60,36 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      # Problem 2: no download-artifact — dist/ does not exist on this machine
+      - name: Download build artifact
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: app-build
+          path: dist/
       - run: npm run test:integration
 
   deploy-staging:
+    # Run after all tests succeed
+    needs: [unit-tests, integration-tests]
+    timeout-minutes: 15
     runs-on: ubuntu-latest
-    # Problem 3: no if condition — runs on every branch
+    if: github.ref == 'refs/heads/main'
     steps:
       - run: echo "Deploying to staging environment"
 
   deploy-production:
+    # Run only after staging succeeds
+    needs: deploy-staging
+    timeout-minutes: 15
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
       - run: echo "Deploying to production environment"
 
   notify:
+    # Run at the end of the pipeline
+    needs: [deploy-production]
+    timeout-minutes: 15
     runs-on: ubuntu-latest
-    # Problem 6: no if: always() — skipped when upstream fails
+    if: always()
     steps:
       - run: echo "Pipeline notification sent"
